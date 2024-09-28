@@ -29,31 +29,32 @@ ColorSensorNlcs21::ErrorCode ColorSensorNlcs21::Initialize() {
   wire_.write(0x00);
   wire_.write(0x80);
   ret = static_cast<ErrorCode>(wire_.endTransmission());
-
-  delay(100);
+  delay(3);
 
   wire_.beginTransmission(i2c_address_);
   wire_.write(0x00);
   wire_.write(0x01);
   wire_.endTransmission();
+  delay(3);
 
-  // wire_.beginTransmission(i2c_address_);
-  // wire_.write(0x04);
-  // wire_.write(0x20);
-  // wire_.endTransmission();
-
+  wire_.beginTransmission(i2c_address_);
+  wire_.write(0x05);
+  wire_.write(0x03);
+  wire_.endTransmission();
+  delay(3);
   return ret;
 }
 
 ColorSensorNlcs21::Color ColorSensorNlcs21::GetColor() const {
   Color color;
-  uint16_t value[3] = {0};
+  uint16_t value[4] = {0};
+  uint16_t raw_r, raw_g, raw_b = 0;
 
+  delay(132.2688);
   // 发送命令请求读取数据
   wire_.beginTransmission(i2c_address_);
   wire_.write(0x1C);
   wire_.endTransmission();
-
   // 请求从传感器读取3个字节的数据
   wire_.requestFrom(i2c_address_, sizeof(value));
 
@@ -61,9 +62,19 @@ ColorSensorNlcs21::Color ColorSensorNlcs21::GetColor() const {
   if (wire_.available() == sizeof(value)) {
     wire_.readBytes(reinterpret_cast<uint8_t *>(value), sizeof(value));
 
-    color.r = value[0];
-    color.g = value[1];
-    color.b = value[2];
+    raw_r = value[0];
+    raw_g = value[1];
+    raw_b = value[2];
+    color.c = value[3];
+  }
+  if (color.c == 0) {
+    color.r = 0;
+    color.g = 0;
+    color.b = 0;
+  } else {
+    color.r = static_cast<uint16_t>((float)raw_r / color.c * 255);
+    color.g = static_cast<uint16_t>((float)raw_g / color.c * 255);
+    color.b = static_cast<uint16_t>((float)raw_b / color.c * 255);
   }
   return color;
 }
