@@ -4,22 +4,14 @@
 
 namespace emakefun {
 namespace {
-constexpr uint16_t kMaxRawR = 500;
-constexpr uint16_t kMaxRawG = 1100;
-constexpr uint16_t kMaxRawB = 800;
-
-float Map(const float value, const float in_min, const float in_max, const float out_min, const float out_max) {
-  if (value <= in_min) {
-    return out_min;
-  } else if (value >= in_max) {
-    return out_max;
-  } else {
-    return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-  }
-}
+constexpr float kIntegrationTimes[] = {2.0667, 8.2668, 33.0672, 132.2688};
 }  // namespace
 
-ColorSensorNlcs21::ColorSensorNlcs21(const uint8_t i2c_address, TwoWire &wire) : i2c_address_(i2c_address), wire_(wire) {
+ColorSensorNlcs21::ColorSensorNlcs21(const Gain gain,
+                                     const IntegrationTime integration_time,
+                                     const uint8_t i2c_address,
+                                     TwoWire& wire)
+    : i2c_address_(i2c_address), wire_(wire), gain_(gain), integration_time_(integration_time) {
   // do somethings
 }
 
@@ -37,46 +29,134 @@ ColorSensorNlcs21::ErrorCode ColorSensorNlcs21::Initialize() {
   wire_.endTransmission();
   delay(3);
 
+  // 开启中断
   wire_.beginTransmission(i2c_address_);
-  wire_.write(0x05);
+  wire_.write(0x01);
   wire_.write(0x03);
   wire_.endTransmission();
   delay(3);
+
+  // 关闭通电复位中断
+  wire_.beginTransmission(i2c_address_);
+  wire_.write(0x02);
+  wire_.write(0x00);
+  wire_.endTransmission();
+  delay(3);
+
+  // persistence filter register
+  wire_.beginTransmission(i2c_address_);
+  wire_.write(0x0B);
+  wire_.write(0x01);  // 0x01: 1次, 0x02: 2次, 0x03: 3次....16次
+  wire_.endTransmission();
+  delay(3);
+
+  // 设置中断通道为透明通道
+  wire_.beginTransmission(i2c_address_);
+  wire_.write(0x16);
+  wire_.write(0x08);
+  wire_.endTransmission();
+  delay(3);
+
+  // 设置增益
+  wire_.beginTransmission(i2c_address_);
+  wire_.write(0x04);
+  wire_.write(0x80 | (0x01 << gain_));
+  wire_.endTransmission();
+  delay(3);
+
+  // 设置积分时间
+  wire_.beginTransmission(i2c_address_);
+  wire_.write(0x05);
+  wire_.write(integration_time_);
+  wire_.endTransmission();
+  delay(3);
+
   return ret;
 }
 
-ColorSensorNlcs21::Color ColorSensorNlcs21::GetColor() const {
-  Color color;
-  uint16_t value[4] = {0};
-  uint16_t raw_r, raw_g, raw_b = 0;
+bool ColorSensorNlcs21::GetColor(Color* const color) const {
+  if (color == nullptr) {
+    return false;
+  }
 
-  delay(132.2688);
-  // 发送命令请求读取数据
+  if (last_read_time_ == 0) {
+    last_read_time_ = millis();
+    return false;
+  }
+
+  if (millis() - last_read_time_ < kIntegrationTimes[integration_time_]) {
+    return false;
+  }
+
+  last_read_time_ = millis();
+
   wire_.beginTransmission(i2c_address_);
   wire_.write(0x1C);
   wire_.endTransmission();
-  // 请求从传感器读取3个字节的数据
-  wire_.requestFrom(i2c_address_, sizeof(value));
+
+  // 请求从传感器读取4个字节的数据
+  wire_.requestFrom(i2c_address_, sizeof(*color));
 
   // 确认读取的数据大小是否正确
-  if (wire_.available() == sizeof(value)) {
-    wire_.readBytes(reinterpret_cast<uint8_t *>(value), sizeof(value));
+  if (wire_.available() == sizeof(*color)) {
+    wire_.readBytes(reinterpret_cast<uint8_t*>(color), sizeof(*color));
+  }
 
-    raw_r = value[0];
-    raw_g = value[1];
-    raw_b = value[2];
-    color.c = value[3];
+  if (color->c == 0) {
+    *color = Color{};
+    return false;
   }
-  if (color.c == 0) {
-    color.r = 0;
-    color.g = 0;
-    color.b = 0;
-  } else {
-    color.r = static_cast<uint16_t>((float)raw_r / color.c * 255);
-    color.g = static_cast<uint16_t>((float)raw_g / color.c * 255);
-    color.b = static_cast<uint16_t>((float)raw_b / color.c * 255);
-  }
-  return color;
+
+  color->r = static_cast<uint16_t>((float)color->r / color->c * 255);
+  color->g = static_cast<uint16_t>((float)color->g / color->c * 255);
+  color->b = static_cast<uint16_t>((float)color->b / color->c * 255);
+
+  return true;
 }
 
+uint8_t ColorSensorNlcs21::GetInterruptStatus() const {
+  uint8_t interrupt = 0;
+  wire_.beginTransmission(i2c_address_);
+  wire_.write(0x02);
+  wire_.endTransmission();
+  // 请求从传感器读取1个字节的数据
+  wire_.requestFrom(i2c_address_, 1);
+
+  if (wire_.available() == 1) interrupt = wire_.read() & 0x01;
+  return interrupt;
+}
+
+void ColorSensorNlcs21::SetThreshold(uint16_t threshold_low, uint16_t threshold_high) const {
+  wire_.beginTransmission(i2c_address_);
+  wire_.write(0x0C);
+  wire_.write(threshold_low & 0xFF);
+  wire_.endTransmission();
+  delay(3);
+  wire_.beginTransmission(i2c_address_);
+  wire_.write(0x0D);
+  wire_.write(threshold_low >> 8);
+  wire_.endTransmission();
+  delay(3);
+  wire_.beginTransmission(i2c_address_);
+  wire_.write(0x0E);
+  wire_.write(threshold_high & 0xFF);
+  wire_.endTransmission();
+  delay(3);
+  wire_.beginTransmission(i2c_address_);
+  wire_.write(0x0F);
+  wire_.write(threshold_high >> 8);
+  wire_.endTransmission();
+  delay(3);
+
+  Serial.print("Threshold set to: ");
+  // Serial.println(threshold);
+}
+
+void ColorSensorNlcs21::ClearInterrupt() const {
+  wire_.beginTransmission(i2c_address_);
+  wire_.write(0x02);
+  wire_.write(0x80);
+  wire_.endTransmission();
+  delay(3);
+}
 }  // namespace emakefun

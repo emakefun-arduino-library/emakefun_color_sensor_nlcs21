@@ -11,7 +11,7 @@ class ColorSensorNlcs21 {
  public:
   static constexpr uint32_t kVersionMajor = 2;
   static constexpr uint32_t kVersionMinor = 0;
-  static constexpr uint32_t kVersionPatch = 0;
+  static constexpr uint32_t kVersionPatch = 1;
   static constexpr uint8_t kDefaultI2cAddress = 0x38;
 
   /**
@@ -29,6 +29,22 @@ class ColorSensorNlcs21 {
     kUnknownError = 7,                        /**< 7：未知错误*/
   };
 
+  enum Gain : uint8_t {
+    kGain1X,
+    kGain4X,
+    kGain8X,
+    kGain32X,
+    kGain96X,
+    kGain192X,
+  };
+
+  enum IntegrationTime : uint8_t {
+    kIntegrationTime2ms,
+    kIntegrationTime8ms,
+    kIntegrationTime33ms,
+    kIntegrationTime132ms,
+  };
+
   struct Color {
     /* data */
     uint16_t r = 0;
@@ -37,9 +53,13 @@ class ColorSensorNlcs21 {
     uint16_t c = 0;
   };
 
-  explicit ColorSensorNlcs21(const uint8_t i2c_address = kDefaultI2cAddress, TwoWire& wire = Wire);
+  explicit ColorSensorNlcs21(const Gain gain,
+                             const IntegrationTime integration_time,
+                             const uint8_t i2c_address = kDefaultI2cAddress,
+                             TwoWire& wire = Wire);
 
-  explicit ColorSensorNlcs21(TwoWire& wire) : ColorSensorNlcs21(kDefaultI2cAddress, wire) {
+  explicit ColorSensorNlcs21(const Gain gain, const IntegrationTime integration_time, TwoWire& wire)
+      : ColorSensorNlcs21(gain, integration_time, kDefaultI2cAddress, wire) {
   }
 
   /**
@@ -48,13 +68,23 @@ class ColorSensorNlcs21 {
    */
   ErrorCode Initialize();
 
-  Color GetColor() const;
+  bool GetColor(Color* const color) const;
+
+  uint8_t GetInterruptStatus() const;
+
+  void ClearInterrupt() const;
+
+  void SetThreshold(uint16_t threshold_low, uint16_t threshold_high) const;
 
  private:
   ColorSensorNlcs21(const ColorSensorNlcs21&) = delete;
   ColorSensorNlcs21& operator=(const ColorSensorNlcs21&) = delete;
 
+  const Gain gain_ = kGain1X;
+  const IntegrationTime integration_time_ = kIntegrationTime132ms;
+
   const uint8_t i2c_address_ = kDefaultI2cAddress;
+  mutable uint64_t last_read_time_ = 0;
   TwoWire& wire_ = Wire;
 };
 }  // namespace emakefun
