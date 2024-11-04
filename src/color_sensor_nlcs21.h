@@ -53,13 +53,13 @@ class ColorSensorNlcs21 {
     uint16_t c = 0;
   };
 
-  explicit ColorSensorNlcs21(const Gain gain,
-                             const IntegrationTime integration_time,
+  explicit ColorSensorNlcs21(const Gain gain = kGain1X,
+                             const IntegrationTime integration_time = kIntegrationTime132ms,
                              const uint8_t i2c_address = kDefaultI2cAddress,
                              TwoWire& wire = Wire);
 
   explicit ColorSensorNlcs21(const Gain gain, const IntegrationTime integration_time, TwoWire& wire)
-      : ColorSensorNlcs21(gain, integration_time, kDefaultI2cAddress, wire) {
+      : ColorSensorNlcs21(kGain1X, kIntegrationTime132ms, kDefaultI2cAddress, Wire) {
   }
 
   /**
